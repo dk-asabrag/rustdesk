@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -1187,7 +1187,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       # Required to inspect and publish signed release assets for the target tag.
-      contents: write
+      contents: read
     steps:
       - name: Refuse to replace published update metadata
         shell: bash
