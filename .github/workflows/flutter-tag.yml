@@ -12,8 +12,33 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  prepare-master-tag:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Align master release tag with the selected branch
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.repository == 'dk-asabrag/rustdesk'
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const ref = 'tags/master';
+            const current = await github.rest.git.getRef({ owner, repo, ref });
+            const comparison = await github.rest.repos.compareCommits({
+              owner, repo, base: current.data.object.sha, head: context.sha
+            });
+            if (!['ahead', 'identical'].includes(comparison.data.status)) {
+              throw new Error('Refusing to move master tag across divergent history');
+            }
+            if (current.data.object.sha !== context.sha) {
+              await github.rest.git.updateRef({ owner, repo, ref, sha: context.sha, force: true });
+            }
   run-flutter-tag-build:
+    needs: prepare-master-tag
     uses: ./.github/workflows/flutter-build.yml
     secrets: inherit
     with:
