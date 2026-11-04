@@ -19,6 +19,8 @@ on:
 
 jobs:
   run-ci:
+    permissions:
+      contents: write
     uses: ./.github/workflows/flutter-build.yml
     secrets: inherit
     with:
