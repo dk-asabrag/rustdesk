@@ -118,6 +118,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -567,6 +568,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -781,6 +783,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1173,6 +1176,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1282,6 +1286,7 @@ jobs:
       - name: Upload signed update artifacts
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1299,6 +1304,7 @@ jobs:
       - name: Upload signed update metadata signature
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1308,6 +1314,7 @@ jobs:
       - name: Publish signed update metadata
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1395,6 +1402,7 @@ jobs:
       - name: Publish unsigned app
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
@@ -1678,6 +1686,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1687,6 +1696,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1863,6 +1873,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1872,6 +1883,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2180,6 +2192,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2216,6 +2229,7 @@ jobs:
         if: matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2531,6 +2545,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2776,6 +2791,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2836,6 +2852,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2921,6 +2938,7 @@ jobs:
       - name: Publish flatpak package
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -3006,6 +3024,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
