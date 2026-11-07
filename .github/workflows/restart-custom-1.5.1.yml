@@ -1,0 +1,62 @@
+name: Restart custom 1.5.1 on supported macOS
+
+on: create
+
+concurrency:
+  group: release-refresh/1.5.1-security-2026-11-07
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  restart-authorized-builds:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref_type == 'branch' && github.event.ref == 'ops/restart-1.5.1-macos15-priority-2026-11-07' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Cancel superseded runs and restart the fixed candidate
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const source = 'e7829a52b639d95eda2f6f541566efadecd8721a';
+            const branch = 'refresh/1.5.1-security-2026-11-07';
+            if (owner !== 'dk-asabrag' || repo !== 'rustdesk') throw new Error('Unexpected repository');
+            const head = (await github.rest.git.getRef({owner,repo,ref:'heads/' + branch})).data.object.sha;
+            if (head !== source) throw new Error('Candidate moved');
+            const oldShas = new Set(['1b1fea82fdefabf2f22b94160e8996a267cbcf6b','593382551125a68c71fb35d9cba1c55b16ab346a','e04fe48392e4c4c60443a1eeccf0eaf28269a7c0','ea9ddd3a20ab195086adabfefbc82821b8b19437']);
+            const oldRuns = [42365562927,42363765434,42363865769,42363865726,42363984520,42363984707,42364086210];
+            for (const run_id of oldRuns) {
+              const run = (await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if (!oldShas.has(run.head_sha)) throw new Error('Unexpected old source: ' + run_id);
+              if (run.status !== 'completed') {
+                await github.rest.actions.cancelWorkflowRun({owner,repo,run_id});
+                core.info('Requested cancellation of superseded run ' + run_id);
+              }
+            }
+            for (let attempt = 0; ; attempt++) {
+              const runs = await Promise.all(oldRuns.map(async run_id =>
+                (await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data));
+              if (runs.every(r => r.status === 'completed')) break;
+              if (attempt >= 60) throw new Error('Old runs did not stop; refusing concurrent replacement uploads');
+              await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+            const release = (await github.rest.repos.getRelease({owner,repo,release_id:437501843})).data;
+            if (!release.draft || release.tag_name !== '1.5.1') throw new Error('Expected staging draft only');
+            const body = (release.body || '').replaceAll('ea9ddd3a20ab195086adabfefbc82821b8b19437', source);
+            await github.rest.repos.updateRelease({owner,repo,release_id:437501843,target_commitish:source,draft:true,body});
+            const existing = (await github.rest.actions.listWorkflowRunsForRepo({owner,repo,head_sha:source,per_page:100})).data.workflow_runs;
+            if (!existing.some(r => r.path === '.github/workflows/flutter-tag.yml' && !['failure','cancelled','timed_out'].includes(r.conclusion))) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner,repo,workflow_id:'flutter-tag.yml',ref:branch,inputs:{'release-tag':'1.5.1'}
+              });
+            }
+            const runs = (await github.rest.actions.listWorkflowRunsForRepo({owner,repo,head_sha:source,per_page:100})).data.workflow_runs;
+            if (!runs.some(r => r.path === '.github/workflows/flutter-ci.yml' && ['queued','in_progress','completed'].includes(r.status))) {
+              await github.rest.actions.createWorkflowDispatch({owner,repo,workflow_id:'flutter-ci.yml',ref:branch});
+            }
+            await core.summary.addHeading('Restarted builds on supported macOS 15')
+              .addRaw('Candidate: ' + source + '\n\nSuperseded builds cancelled with explicit user approval. Draft release remains unpublished.\n')
+              .write();
