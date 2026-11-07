@@ -118,6 +118,8 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -567,6 +569,8 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -781,6 +785,8 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -926,7 +932,7 @@ jobs:
             }
           - {
               target: aarch64-apple-darwin,
-              os: macos-14,
+              os: macos-15,
               # extra-build-args: "--disable-flutter-texture-render", # disable this for mac, because we see a lot of users reporting flickering both on arm and x64, and we can not confirm if texture rendering has better performance if htere is no vram, https://github.com/rustdesk/rustdesk/issues/6296
               extra-build-args: "--screencapturekit",
               extra-cargo-features: ",screencapturekit",
@@ -1173,6 +1179,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1282,6 +1290,8 @@ jobs:
       - name: Upload signed update artifacts
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1299,6 +1309,8 @@ jobs:
       - name: Upload signed update metadata signature
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1308,6 +1320,8 @@ jobs:
       - name: Publish signed update metadata
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           fail_on_unmatched_files: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1395,6 +1409,8 @@ jobs:
       - name: Publish unsigned app
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
@@ -1678,6 +1694,8 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1687,6 +1705,8 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1863,6 +1883,8 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -1872,6 +1894,8 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2180,6 +2204,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2216,6 +2242,8 @@ jobs:
         if: matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2531,6 +2559,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2776,6 +2806,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2836,6 +2868,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -2921,6 +2955,8 @@ jobs:
       - name: Publish flatpak package
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
@@ -3006,6 +3042,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
