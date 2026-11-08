@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -15,6 +16,19 @@ KEY_ID = "dk-asabrag-2026-ed25519-main"
 
 
 class ForkUpdateTests(unittest.TestCase):
+    def test_pending_draft_is_found_without_a_published_tag(self):
+        with mock.patch.object(sys, "path", [str(ROOT), *sys.path]):
+            import publish_fork_update_metadata as publisher
+        draft = {"id": 438, "tag_name": "1.5.2", "draft": True, "assets": []}
+        with mock.patch.object(publisher, "api", side_effect=[[draft], draft]) as request:
+            self.assertEqual(publisher.release_for_tag("1.5.2"), draft)
+            self.assertEqual(request.call_args_list[-1].args[0], "repos/dk-asabrag/rustdesk/releases/438")
+        for releases in ([], [draft, dict(draft, id=439)]):
+            with self.subTest(releases=releases):
+                with mock.patch.object(publisher, "api", return_value=releases):
+                    with self.assertRaises(SystemExit):
+                        publisher.release_for_tag("1.5.2")
+
     def test_custom_release_signs_verifies_and_rejects_tampering(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

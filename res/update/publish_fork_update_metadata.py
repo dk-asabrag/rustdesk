@@ -20,6 +20,20 @@ def api(path):
     return json.loads(subprocess.check_output(["gh", "api", path], text=True))
 
 
+def release_for_tag(tag):
+    matches = []
+    page = 1
+    while True:
+        releases = api(f"repos/{REPO}/releases?per_page=100&page={page}")
+        matches.extend(release for release in releases if release["tag_name"] == tag)
+        if len(releases) < 100:
+            break
+        page += 1
+    if len(matches) != 1:
+        raise SystemExit("expected exactly one release with this pending tag")
+    return api(f"repos/{REPO}/releases/{matches[0]['id']}")
+
+
 def main():
     if os.environ.get("GITHUB_REPOSITORY") != REPO:
         raise SystemExit("unexpected repository")
@@ -27,7 +41,7 @@ def main():
     if not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+", tag) or tag.removeprefix("v") != version:
         raise SystemExit("fork automatic updates require a stable tag matching the client version")
     check_key()
-    release = api(f"repos/{REPO}/releases/tags/{tag}")
+    release = release_for_tag(tag)
     if release["tag_name"] != tag or not release["draft"] or release["target_commitish"] != sha:
         raise SystemExit("expected an unpublished draft at the exact built commit")
     assets = release["assets"]
