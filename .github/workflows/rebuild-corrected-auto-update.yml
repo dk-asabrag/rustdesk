@@ -1,0 +1,28 @@
+name: Build corrected fork update packages
+on: create
+permissions:
+  contents: write
+  actions: write
+jobs:
+  dispatch:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref == 'ops/rebuild-corrected-auto-update-1.5.2-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const source='a8c294780815c510f74ed22fcef68e6177dbfc4b';
+            const head=(await github.rest.git.getRef({owner,repo,ref:'heads/feature/signed-auto-updates-2026-11-08'})).data;
+            if(head.object.sha!==source)throw new Error('Source changed');
+            const old=(await github.rest.actions.getWorkflowRun({owner,repo,run_id:42519109590})).data;
+            if(old.head_sha!=='b3d92d42a875adacf278e72252930a692a9a037d')throw new Error('Unexpected obsolete build');
+            if(old.status!=='completed')await github.rest.actions.cancelWorkflowRun({owner,repo,run_id:42519109590});
+            const release=(await github.rest.repos.getRelease({owner,repo,release_id:438494334})).data;
+            if(!release.draft||release.tag_name!=='1.5.2'||!['b3d92d42a875adacf278e72252930a692a9a037d',source].includes(release.target_commitish))throw new Error('Unexpected draft');
+            await github.rest.repos.updateRelease({owner,repo,release_id:438494334,target_commitish:source});
+            const tag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;
+            if(!['b3d92d42a875adacf278e72252930a692a9a037d',source].includes(tag.object.sha))throw new Error('Unexpected unpublished tag');
+            if(tag.object.sha!==source)await github.rest.git.updateRef({owner,repo,ref:'tags/1.5.2',sha:source,force:false});
+            await github.rest.actions.createWorkflowDispatch({owner,repo,workflow_id:'flutter-tag.yml',ref:'feature/signed-auto-updates-2026-11-08',inputs:{'release-tag':'1.5.2'}});
+            core.info('Corrected exact-source build dispatched; draft remains unpublished.');
