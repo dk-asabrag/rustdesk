@@ -1,0 +1,29 @@
+name: Diagnose official macOS vcpkg download
+on: create
+permissions:
+  contents: read
+jobs:
+  verify-download:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref_type == 'branch' && github.event.ref == 'ops/probe-vcpkg-download-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const crypto = require('node:crypto');
+            const expected = '33a8a949e2de5f1880ef02bfd447454ee149368b8d1179d8c597abba518ab12133b29b8ee4fe830de69857772c937d5097afc68b379c9d315ab72a725ed4d43b';
+            const base = 'https://github.com/microsoft/vcpkg-tool/releases/download/2026-07-27/vcpkg-macos';
+            const urls = [base, base + '?verify=' + Date.now(), 'https://api.github.com/repos/microsoft/vcpkg-tool/releases/assets/492069858'];
+            for (const url of urls) {
+              try {
+                const r = await fetch(url, { headers: { Accept: 'application/octet-stream', 'User-Agent': 'rustdesk-build-download-verification' }, signal: AbortSignal.timeout(45000) });
+                core.info(url + ' => HTTP ' + r.status);
+                if (r.ok) {
+                  const bytes = Buffer.from(await r.arrayBuffer());
+                  const sha = crypto.createHash('sha512').update(bytes).digest('hex');
+                  core.info('size=' + bytes.length + ' official SHA512 match=' + (sha === expected));
+                  if (sha !== expected) throw new Error('Official checksum mismatch');
+                }
+              } catch (e) { core.warning(String(e)); }
+            }
