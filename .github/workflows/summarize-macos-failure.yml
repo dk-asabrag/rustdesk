@@ -1,0 +1,22 @@
+name: Summarize macOS dependency failure
+on: create
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnose:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref_type == 'branch' && github.event.ref == 'ops/summarize-macos-failure-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const response=await github.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs',{owner,repo,job_id:128703431697});
+            const text=typeof response.data==='string'?response.data:Buffer.from(response.data).toString('utf8');
+            const lines=text.split('\n');
+            const selected=lines.filter(l=>/error|failed|fatal|curl:|unsupported|BUILD_FAILED|download.*https/i.test(l)).slice(-100);
+            core.info(selected.join('\n').slice(-25000));
+            await core.summary.addHeading('macOS Intel dependency failure')
+            .addCodeBlock(selected.join('\n').slice(-25000)).write();
