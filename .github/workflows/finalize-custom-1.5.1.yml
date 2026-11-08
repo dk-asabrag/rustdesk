@@ -1,0 +1,100 @@
+name: Finalize validated custom RustDesk 1.5.1
+
+on: create
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: finalize-custom-rustdesk-1.5.1
+  cancel-in-progress: false
+
+jobs:
+  publish-validated-release:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref_type == 'branch' && github.event.ref == 'ops/finalize-1.5.1-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact source, validations and assets before publication
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const source = 'e7829a52b639d95eda2f6f541566efadecd8721a';
+            const previous = 'e329d795360a79bf64fc1d22920aafb5ec9c4ea9';
+            const releaseId = 437518085;
+            if (owner !== 'dk-asabrag' || repo !== 'rustdesk') throw new Error('Unexpected repository');
+            const gates = [
+              [42365447182, '.github/workflows/ci.yml'],
+              [42365447237, '.github/workflows/flutter-ci.yml']
+            ];
+            for (const [run_id, path] of gates) {
+              const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id });
+              if (run.head_sha !== source || run.path !== path || run.status !== 'completed' || run.conclusion !== 'success') {
+                throw new Error('Validation gate not satisfied: ' + run_id);
+              }
+            }
+            const originalRun = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: 42366299773 })).data;
+            if (originalRun.head_sha !== source || originalRun.path !== '.github/workflows/flutter-tag.yml' || originalRun.status !== 'completed' || originalRun.conclusion !== 'failure') throw new Error('Unexpected original package run');
+            const originalJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { owner, repo, run_id: 42366299773, filter: 'latest', per_page: 100 });
+            const failedJobs = originalJobs.filter(j => !['success', 'skipped'].includes(j.conclusion));
+            if (failedJobs.length !== 1 || failedJobs[0].name !== 'run-flutter-tag-build / x86_64-apple-darwin') throw new Error('Unexpected failure outside recovered macOS Intel job');
+            const { data: master } = await github.rest.git.getRef({ owner, repo, ref: 'heads/master' });
+            if (![previous, source].includes(master.object.sha)) throw new Error('Master changed unexpectedly');
+            const { data: backup } = await github.rest.git.getRef({ owner, repo, ref: 'heads/backup/pre-1.5.1-refresh-2026-11-07' });
+            if (backup.object.sha !== previous) throw new Error('Pre-update backup differs');
+            const { data: release } = await github.rest.repos.getRelease({ owner, repo, release_id: releaseId });
+            if (release.tag_name !== '1.5.1' || release.target_commitish !== source) {
+              throw new Error('Draft source or release notes differ');
+            }
+            const expected = ["rustdesk-1.5.1-0-x86_64.pkg.tar.zst","rustdesk-1.5.1-0.aarch64-suse.rpm","rustdesk-1.5.1-0.aarch64.rpm","rustdesk-1.5.1-0.x86_64-suse.rpm","rustdesk-1.5.1-0.x86_64.rpm","rustdesk-1.5.1-aarch64.apk","rustdesk-1.5.1-aarch64.AppImage","rustdesk-1.5.1-aarch64.deb","rustdesk-1.5.1-aarch64.dmg","rustdesk-1.5.1-aarch64.exe","rustdesk-1.5.1-aarch64.flatpak","rustdesk-1.5.1-aarch64.msi","rustdesk-1.5.1-armv7-sciter.deb","rustdesk-1.5.1-armv7.apk","rustdesk-1.5.1-universal.apk","rustdesk-1.5.1-x86-sciter.exe","rustdesk-1.5.1-x86_64-sciter.deb","rustdesk-1.5.1-x86_64-sciter.flatpak","rustdesk-1.5.1-x86_64.apk","rustdesk-1.5.1-x86_64.AppImage","rustdesk-1.5.1-x86_64.deb","rustdesk-1.5.1-x86_64.exe","rustdesk-1.5.1-x86_64.flatpak","rustdesk-1.5.1-x86_64.msi","rustdesk-unattended-wayland-1.5.1-x86_64.deb","rustdesk.sbom.json"];
+            const buildCreatedAt = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: 42366299773 })).data.created_at;
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id: releaseId, per_page: 100 });
+            if (assets.length !== expected.length || new Set(assets.map(a => a.name)).size !== expected.length) {
+              throw new Error('Unexpected asset count');
+            }
+            for (const name of expected) {
+              const a = assets.find(a => a.name === name);
+              if (!a || a.state !== 'uploaded' || a.size <= 0 || Date.parse(a.created_at) < Date.parse(buildCreatedAt) || !/^sha256:[a-f0-9]{64}$/.test(a.digest || '')) {
+                throw new Error('Asset missing or unverified: ' + name);
+              }
+            }
+            if (master.object.sha !== source) {
+              const currentMaster = (await github.rest.git.getRef({ owner, repo, ref: 'heads/master' })).data;
+              if (currentMaster.object.sha !== previous) throw new Error('Master moved during validation');
+              await github.rest.git.updateRef({ owner, repo, ref: 'heads/master', sha: source, force: false });
+            }
+            const verifiedMaster = (await github.rest.git.getRef({ owner, repo, ref: 'heads/master' })).data;
+            if (verifiedMaster.object.sha !== source) throw new Error('Master update verification failed');
+            let tag;
+            try {
+              tag = (await github.rest.git.getRef({ owner, repo, ref: 'tags/1.5.1' })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({ owner, repo, ref: 'refs/tags/1.5.1', sha: source });
+              tag = (await github.rest.git.getRef({ owner, repo, ref: 'tags/1.5.1' })).data;
+            }
+            let tagSha = tag.object.sha;
+            if (tag.object.type === 'tag') {
+              tagSha = (await github.rest.git.getTag({ owner, repo, tag_sha: tagSha })).data.object.sha;
+            }
+            if (tagSha !== source) throw new Error('Release tag points to another source');
+            if (release.draft) {
+              await github.rest.repos.updateRelease({
+                owner, repo, release_id: releaseId, draft: false, prerelease: false,
+                target_commitish: source, make_latest: 'true', name: 'RustDesk 1.5.1 — version personnalisée (8 novembre 2026)', body: "Version personnalisée basée sur la stable officielle [RustDesk 1.5.1](https://github.com/rustdesk/rustdesk/releases/tag/1.5.1), avec le [correctif de sécurité des relais 2c085f91](https://github.com/rustdesk/rustdesk/commit/2c085f91db7909cf0fa7245609460c3ca37a9306).\n\nServeur par défaut : **rustdesk.anjou.cc**. La clé publique personnalisée et le sous-module `dk-asabrag/hbb_common` sont conservés.\n\nLe correctif refuse les adresses de relais que le client contrôlé n’a pas proposées et valide les identifiants de relais.\n\n### Téléchargements Windows\n\n- **64 bits (x64)** : [EXE portable](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-x86_64.exe) · [Installateur MSI](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-x86_64.msi)\n- **ARM64** : [EXE](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-aarch64.exe) · [MSI](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-aarch64.msi)\n- **32 bits (Sciter)** : [EXE](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-x86-sciter.exe)\n\nLes paquets Linux, macOS et Android figurent dans les fichiers joints à la release.\n\n### Sources et validations\n\nSources exactes : [`e7829a52b639d95eda2f6f541566efadecd8721a`](https://github.com/dk-asabrag/rustdesk/commit/e7829a52b639d95eda2f6f541566efadecd8721a).\n\n[Tests et compilation Flutter](https://github.com/dk-asabrag/rustdesk/actions/runs/42365447237) · [Construction des paquets](https://github.com/dk-asabrag/rustdesk/actions/runs/42366299773) · [Détail de la mise à jour](https://github.com/dk-asabrag/rustdesk/pull/1).\n\n**26 fichiers publiés après validation. Le DMG macOS Intel (x86_64) et l’archive regroupant les binaires non signés ne sont pas disponibles dans cette release.** Leur construction est bloquée par le téléchargement de libvpx : erreurs HTTP 504, puis empreinte SHA512 de l’archive officielle différente de celle attendue par vcpkg. Les contrôles d’intégrité ont été conservés et aucun ancien binaire n’a été réutilisé. Le DMG macOS ARM64 est disponible.\n\nLimite connue du correctif amont : un repli WebRTC vers un relais réécrit par hbbs pour le réseau local peut être refusé et expirer.\n"
+              });
+            }
+            const { data: published } = await github.rest.repos.getRelease({ owner, repo, release_id: releaseId });
+            if (published.draft || published.prerelease || published.tag_name !== '1.5.1') {
+              throw new Error('Publication verification failed');
+            }
+            const oldRelease = (await github.rest.repos.getRelease({ owner, repo, release_id: 410710932 })).data;
+            if (oldRelease.tag_name !== 'master') throw new Error('Unexpected old release');
+            await core.summary
+              .addHeading('Validated custom RustDesk 1.5.1 published')
+              .addRaw('Source: ' + source + '\n\n')
+              .addLink('Release', published.html_url)
+              .addRaw('\n\nAll 26 authorized assets verified. macOS Intel DMG and aggregate unsigned archive intentionally omitted. Previous master release retained pending deletion confirmation.\n')
+              .write();
