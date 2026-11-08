@@ -24,4 +24,4 @@ jobs:
           git diff --check HEAD^ HEAD
           python -m unittest res/update/test_generate_update_metadata.py res/update/test_update_metadata_cli.py res/update/test_macos_update_scripts.py res/update/test_fork_update_metadata.py
       - name: Audit existing automatic update entry points
-        run: rg -n 'start_auto_update|OPTION_ALLOW_AUTO_UPDATE' src || test "$?" -eq 1
+        run: git grep -n -E 'start_auto_update|OPTION_ALLOW_AUTO_UPDATE' -- src || test "$?" -eq 1
