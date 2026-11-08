@@ -1,0 +1,503 @@
+name: Recover validated 1.5.1 macOS Intel package
+on: create
+permissions:
+  contents: write
+  actions: read
+env:
+  SCITER_RUST_VERSION: "1.75" # https://github.com/rustdesk/rustdesk/discussions/7503, also 1.78 has ABI change which causes our sciter version not working, https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
+  RUST_VERSION: "1.75" # sciter failed on m1 with 1.78 because of https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
+  MAC_RUST_VERSION: "1.81" # 1.81 is requred for macos, because of https://github.com/yury/cidre requires 1.81
+  CARGO_NDK_VERSION: "3.1.2"
+  SCITER_ARMV7_CMAKE_VERSION: "3.29.7"
+  SCITER_NASM_DEBVERSION: "2.15.05-1"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  ANDROID_FLUTTER_VERSION: "3.24.5"
+  # Windows arm64 only: the first stable Flutter to ship a native arm64 Windows Dart SDK +
+  # engine is 3.44. Every other platform stays on FLUTTER_VERSION (3.24.5) until Windows 7
+  # support is restored after the upstream-wide Flutter bump. The arm64 job patches the few
+  # 3.44-only source/pubspec changes on the fly (see "Patch RustDesk sources for Flutter 3.44").
+  FLUTTER_WINDOWS_ARM_VERSION: "3.44.9"
+  # for arm64 linux because official Dart SDK does not work
+  FLUTTER_ELINUX_VERSION: "3.16.9"
+  TAG_NAME: "1.5.1"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  # vcpkg version: 2026.07.29
+  # If we change the `VCPKG COMMIT_ID`, please remember:
+  # 1. Call `$VCPKG_ROOT/vcpkg x-update-baseline` to update the baseline in `vcpkg.json`.
+  #  Or we may face build issue like 
+  #  https://github.com/rustdesk/rustdesk/actions/runs/14414119794/job/40427970174
+  # 2. Update the `VCPKG_COMMIT_ID` in `ci.yml` and `playground.yml`.
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VCPKG_CMAKE_VERSION: "4.3.0"
+  ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836" # 2025.01.13, got "/opt/artifacts/vcpkg/vcpkg: No such file or directory" with latest version
+  VERSION: "1.5.1"
+  NDK_VERSION: "r28c"
+  #signing keys env variable checks
+  ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
+  MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
+  UPLOAD_ARTIFACT: "true"
+  PUBLISH_UPDATE_METADATA: "false"
+  SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}-2"
+
+jobs:
+  build-macos-intel:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref_type == 'branch' && github.event.ref == 'ops/recover-macos-intel-1.5.1-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    name: recovered-macos-intel
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {target: x86_64-apple-darwin, os: macos-15-intel, extra-build-args: "", extra-cargo-features: "", arch: x86_64, vcpkg-triplet: x64-osx}
+    steps:
+      - name: Verify validated source and unpublished staging release
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const source = 'e7829a52b639d95eda2f6f541566efadecd8721a';
+            for (const run_id of [42365447182, 42365447237]) {
+              const r = (await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if (r.head_sha !== source || r.status !== 'completed' || r.conclusion !== 'success') throw new Error('Validation gate failed');
+            }
+            const r = (await github.rest.actions.getWorkflowRun({owner,repo,run_id:42366299773})).data;
+            if (r.head_sha !== source || r.status !== 'completed') throw new Error('Original build is still active or has another source');
+            const release = (await github.rest.repos.getRelease({owner,repo,release_id:437518085})).data;
+            if (!release.draft || release.tag_name !== '1.5.1' || release.target_commitish !== source) throw new Error('Wrong staging release');
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+          ref: e7829a52b639d95eda2f6f541566efadecd8721a
+
+      - name: Verify checked-out application and custom submodule
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = 'e7829a52b639d95eda2f6f541566efadecd8721a'
+          test "$(git -C libs/hbb_common rev-parse HEAD)" = '2349074f86ae4cf2ae58840f13d0be76c4461287'
+
+      - name: Import the codesign cert
+        if: env.MACOS_P12_BASE64 != null
+        uses: apple-actions/import-codesign-certs@253ddeeac23f2bdad1646faac5c8c2832e800071 # v1
+        with:
+          p12-file-base64: ${{ secrets.MACOS_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
+          keychain: rustdesk
+
+      - name: Check sign and import sign key
+        if: env.MACOS_P12_BASE64 != null
+        run: |
+          security default-keychain -s rustdesk.keychain
+          security find-identity -v
+
+      - name: Import notarize key
+        if: env.MACOS_P12_BASE64 != null
+        uses: timheuer/base64-to-file@adaa40c0c581f276132199d4cf60afa07ce60eac # v1.2
+        with:
+          # https://gregoryszorc.com/docs/apple-codesign/stable/apple_codesign_rcodesign.html#notarizing-and-stapling
+          fileName: rustdesk.json
+          fileDir: ${{ github.workspace }}
+          encodedString: ${{ secrets.MACOS_NOTARIZE_JSON }}
+
+      - name: Install rcodesign tool
+        if: env.MACOS_P12_BASE64 != null
+        shell: bash
+        run: |
+          pushd /tmp
+          wget https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-macos-universal.tar.gz
+          tar -zxvf apple-codesign-0.22.0-macos-universal.tar.gz
+          mv apple-codesign-0.22.0-macos-universal/rcodesign /usr/local/bin
+          popd
+
+      - name: Install build runtime
+        run: |
+          brew install llvm create-dmg
+          # pkg-config is handled in a separate step, because it may be already installed by `macos-latest`(14.7.1) runner
+          if command -v pkg-config &>/dev/null; then
+              echo "pkg-config is already installed"
+          else
+              brew install pkg-config
+          fi
+
+      - name: Install NASM
+        run: |
+          # Install NASM 2.16.x from official release.
+          # Do NOT use `brew install nasm` which installs NASM 3.x.
+          # NASM 3.x is a complete rewrite with incompatible CLI options and removed features.
+          # aom and other multimedia libraries require NASM 2.x for x86/x86_64 assembly.
+          wget https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          unzip nasm-2.16.03-macosx.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+          nasm --version
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch flutter
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          if [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]]; then
+            git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+          fi
+
+      - name: Workaround for flutter issue
+        shell: bash
+        run: |
+          cd "$(dirname "$(which flutter)")"
+          # https://github.com/flutter/flutter/issues/133533
+          sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
+          grep -n '_setFramesEnabledState(false);' ../packages/flutter/lib/src/scheduler/binding.dart
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: ${{ matrix.job.target }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: ${{ matrix.job.os }}
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Run the Dart tests
+        if: ${{ !true && matrix.job.arch == 'aarch64' }}
+        working-directory: flutter
+        run: flutter test --timeout 60s
+
+      - name: Use official API route for the pinned vcpkg binary
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/vcpkg-download-route"
+          cat > "$RUNNER_TEMP/vcpkg-download-route/curl" <<'CURL_WRAPPER'
+          #!/bin/bash
+          args=("$@")
+          for i in "${!args[@]}"; do
+            if [[ "${args[$i]}" == 'https://github.com/microsoft/vcpkg-tool/releases/download/2026-07-27/vcpkg-macos' ]]; then
+              args[$i]='https://api.github.com/repos/microsoft/vcpkg-tool/releases/assets/492069858'
+              exec /usr/bin/curl -H 'Accept: application/octet-stream' -H 'User-Agent: rustdesk-vcpkg-recovery' "${args[@]}"
+            fi
+          done
+          exec /usr/bin/curl "$@"
+          CURL_WRAPPER
+          chmod +x "$RUNNER_TEMP/vcpkg-download-route/curl"
+          echo "$RUNNER_TEMP/vcpkg-download-route" >> "$GITHUB_PATH"
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Fetch blocked GitHub archives through verified official routes
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/vcpkg-verified-fetch.py" <<'PY_FETCH'
+          import hashlib, json, pathlib, re, sys, time, urllib.parse, urllib.request
+          url, expected, destination = sys.argv[1:]
+          if not re.fullmatch(r"[0-9a-fA-F]{128}", expected):
+              raise SystemExit("Invalid expected SHA512")
+          parsed = urllib.parse.urlparse(url)
+          if parsed.hostname != "github.com":
+              raise SystemExit(1)
+          archive = re.fullmatch(r"/([^/]+)/([^/]+)/archive/(.+)\.(tar\.gz|zip)", parsed.path)
+          release = re.fullmatch(r"/([^/]+)/([^/]+)/releases/download/(.+)/([^/]+)", parsed.path)
+          headers = {"User-Agent": "rustdesk-verified-asset-recovery"}
+          if archive:
+              owner, repo, ref, kind = archive.groups()
+              route = "tar.gz" if kind == "tar.gz" else "zip"
+              target = f"https://codeload.github.com/{owner}/{repo}/{route}/{ref}"
+          elif release:
+              owner, repo, tag, name = release.groups()
+              tag = urllib.parse.quote(urllib.parse.unquote(tag), safe="")
+              metadata = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+              with urllib.request.urlopen(urllib.request.Request(metadata, headers=headers), timeout=120) as response:
+                  data = json.load(response)
+              asset = next(a for a in data["assets"] if a["name"] == urllib.parse.unquote(name))
+              target = asset["url"]
+              if not target.startswith(f"https://api.github.com/repos/{owner}/{repo}/releases/assets/"):
+                  raise SystemExit("Unexpected official asset URL")
+              headers["Accept"] = "application/octet-stream"
+          else:
+              raise SystemExit(1)
+          for attempt in range(3):
+              try:
+                  request = urllib.request.Request(target, headers=headers)
+                  with urllib.request.urlopen(request, timeout=120) as response:
+                      content = response.read()
+                  actual = hashlib.sha512(content).hexdigest()
+                  if actual.lower() != expected.lower():
+                      raise RuntimeError("Official source SHA512 mismatch")
+                  path = pathlib.Path(destination)
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  temporary = path.with_name(path.name + ".verified-part")
+                  temporary.write_bytes(content)
+                  temporary.replace(path)
+                  print("Verified official asset:", url, "SHA512:", actual)
+                  break
+              except Exception:
+                  if attempt == 2:
+                      raise
+                  time.sleep(5)
+          PY_FETCH
+          echo "X_VCPKG_ASSET_SOURCES=clear;x-script,python3 \"$RUNNER_TEMP/vcpkg-verified-fetch.py\" \"{url}\" \"{sha512}\" \"{dst}\"" >> "$GITHUB_ENV"
+          python3 "$RUNNER_TEMP/vcpkg-verified-fetch.py" \
+            "https://github.com/webmproject/libvpx/archive/v1.15.2.tar.gz" \
+            "07f5e352411d6c0be331706d1835ac89bafbeddcbbac5542b473323766e9e974f4f68b33590f2aa50a7d8d69468a642b508cbb0a7c49a82c9933b07820f9c9d9" \
+            "$VCPKG_ROOT/downloads/webmproject-libvpx-v1.15.2.tar.gz"
+
+      - name: Install vcpkg dependencies
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+          head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
+
+      - name: Show version information (Rust, cargo, Clang)
+        shell: bash
+        run: |
+          clang --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Build rustdesk
+        run: |
+          if [ "${{ matrix.job.target }}" = "aarch64-apple-darwin" ]; then
+            MIN_MACOS_VERSION="12.3"
+            sed -i -e "s/MACOSX_DEPLOYMENT_TARGET\=[0-9]*.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
+            sed -i -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
+            sed -i -e "s/osx_minimum_system_version = \"[0-9]*.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
+            sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
+            echo "MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}" >> "$GITHUB_ENV"
+          fi
+          ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
+
+      - name: Test verified updates
+        if: env.PUBLISH_UPDATE_METADATA == 'true'
+        run: |
+          python3 -m unittest res/update/test_macos_update_scripts.py
+          cargo test --locked --release --lib platform::macos::update_tests --features "flutter,hwcodec,unix-file-copy-paste${{ matrix.job.extra-cargo-features }}"
+          cargo test --locked --release --lib verified_dmg_tests --features "flutter,hwcodec,unix-file-copy-paste${{ matrix.job.extra-cargo-features }}"
+          cargo test --locked --release --lib update_metadata::tests --features "flutter,hwcodec,unix-file-copy-paste${{ matrix.job.extra-cargo-features }}"
+
+      - name: Run the Rust tests
+        if: ${{ !true && matrix.job.arch == 'aarch64' }}
+        run: |
+          # The build's own features, so the tests see the code that ships. MACOSX_DEPLOYMENT_TARGET
+          # comes from the build step's export.
+          FEATURES=$(./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }} --print-features)
+          cargo test --locked --release --lib --features "$FEATURES"
+          # Opt-in, and its macOS tests run nowhere else.
+          cargo test --locked --release -p clipboard --features unix-file-copy-paste
+
+      - name: create unsigned dmg
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          CREATE_DMG="$(command -v create-dmg)"
+          CREATE_DMG="$(readlink -f "$CREATE_DMG")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
+
+      - name: Upload unsigned macOS app
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-unsigned-macos-${{ matrix.job.arch }}
+          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg # can not upload the directory directly or tar.gz, which destroy the link structure, causing the codesign failed
+
+      - name: Codesign app and create signed dmg
+        if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          # Patch create-dmg to give more attempts to unmount image
+          CREATE_DMG="$(command -v create-dmg)"
+          CREATE_DMG="$(readlink -f "$CREATE_DMG")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          # Unlock keychain
+          security default-keychain -s rustdesk.keychain
+          security unlock-keychain -p ${{ secrets.MACOS_P12_PASSWORD }} rustdesk.keychain
+          # start sign the rustdesk.app and dmg
+          rm -rf *.dmg || true
+          # the identity secret carries its own shell quoting, so expand it inline like the dmg codesign below
+          bash ./.github/scripts/sign-macos-app.sh \
+            ./flutter/build/macos/Build/Products/Release/RustDesk.app \
+            ${{ secrets.MACOS_CODESIGN_IDENTITY }} \
+            ./flutter/macos/Runner/Release.entitlements
+          if [ "$PUBLISH_UPDATE_METADATA" = "true" ]; then
+            reported_version="$(./flutter/build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/RustDesk --version)"
+            if [ "$reported_version" != "$VERSION" ]; then
+              echo "::error::RustDesk reports version '$reported_version', expected '$VERSION'"
+              exit 1
+            fi
+          fi
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
+          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict rustdesk-${{ env.VERSION }}.dmg -vvv
+          # notarize the rustdesk-${{ env.VERSION }}.dmg
+          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple rustdesk-${{ env.VERSION }}.dmg
+
+      - name: Rename rustdesk
+        if: env.UPLOAD_ARTIFACT == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ env.VERSION }}
+          ARCH: ${{ matrix.job.arch }}
+        run: |
+          if [ -f "rustdesk-${VERSION}.dmg" ]; then
+              mv "rustdesk-${VERSION}.dmg" "rustdesk-${VERSION}-${ARCH}.dmg"
+          fi
+          test -f "rustdesk-${VERSION}-${ARCH}.dmg"
+
+      - name: Upload signed macOS DMG
+        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA == 'true' && env.MACOS_P12_BASE64 != null
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-${{ matrix.job.arch }}-dmg
+          path: ./rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg
+          if-no-files-found: error
+
+      - name: Publish DMG package
+        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          target_commitish: e7829a52b639d95eda2f6f541566efadecd8721a
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
+          prerelease: true
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            rustdesk*-${{ matrix.job.arch }}.dmg
+
+
+  publish_unsigned:
+    needs: [build-macos-intel]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-macos-x86_64
+          path: ./
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-macos-aarch64
+          path: ./
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-windows-x86_64
+          path: ./windows-x86_64/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-windows-aarch64
+          path: ./windows-aarch64/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-windows-x86
+          path: ./windows-x86/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-msi-template-x86_64
+          path: ./msi-template/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-msi-template-aarch64
+          path: ./msi-template/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-packer-template-x86_64
+          path: ./packer-template/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-packer-template-aarch64
+          path: ./packer-template/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Download Artifacts
+        if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rustdesk-unsigned-packer-template-x86
+          path: ./packer-template/
+          github-token: ${{ github.token }}
+          run-id: 42366299773
+
+      - name: Combine unsigned app
+        run: |
+          packer_template=()
+          if [[ "$SIGN_BASE_URL" != '-2' ]]; then
+            packer_template=(packer-template)
+          fi
+          tar czf rustdesk-${{ env.VERSION }}-unsigned.tar.gz *.dmg windows-x86_64 windows-aarch64 windows-x86 msi-template "${packer_template[@]}"
+
+      - name: Publish unsigned app
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          target_commitish: e7829a52b639d95eda2f6f541566efadecd8721a
+          draft: ${{ github.repository != 'rustdesk/rustdesk' }}
+          prerelease: true
+          tag_name: ${{ env.TAG_NAME }}
+          files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
+
+
