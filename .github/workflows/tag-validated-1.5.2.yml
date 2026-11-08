@@ -1,0 +1,38 @@
+name: Prepare validated RustDesk 1.5.2 tag
+on: create
+permissions:
+  contents: write
+  actions: read
+jobs:
+  tag-validated-source:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref == 'ops/tag-validated-1.5.2-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const source='b3d92d42a875adacf278e72252930a692a9a037d';
+            for(const run_id of [42515822828,42515822849,42515822867]){
+              const r=(await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if(r.head_sha!==source||r.status!=='completed'||r.conclusion!=='success') throw new Error('Client validation incomplete');
+            }
+            const release=(await github.rest.repos.getRelease({owner,repo,release_id:438494334})).data;
+            if(!release.draft||release.tag_name!=='1.5.2'||release.target_commitish!==source) throw new Error('Unexpected draft');
+            let tag;
+            try{tag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;}
+            catch(error){
+              if(error.status!==404)throw error;
+              await github.rest.git.createRef({owner,repo,ref:'refs/tags/1.5.2',sha:source});
+              tag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;
+            }
+            if(tag.object.type!=='commit'||tag.object.sha!==source) throw new Error('Tag differs');
+            try{
+              const byTag=(await github.rest.repos.getReleaseByTag({owner,repo,tag:'1.5.2'})).data;
+              if(byTag.id!==438494334||!byTag.draft) throw new Error('Release state changed');
+              core.info('Validated source tagged; draft is also accessible by tag.');
+            }catch(error){
+              if(error.status!==404)throw error;
+              core.info('Validated source tagged. Pending draft still requires lookup by ID.');
+            }
