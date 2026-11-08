@@ -65,7 +65,9 @@ def main():
         with path.open("wb") as output:
             subprocess.run(["gh", "api", f"repos/{REPO}/releases/assets/{asset['id']}",
                             "--header", "Accept: application/octet-stream"], stdout=output, check=True)
-        if path.stat().st_size != asset["size"] or hashlib.file_digest(path.open("rb"), "sha256").hexdigest() != digest[7:]:
+        with path.open("rb") as downloaded:
+            actual_digest = hashlib.file_digest(downloaded, "sha256").hexdigest()
+        if path.stat().st_size != asset["size"] or actual_digest != digest[7:]:
             raise SystemExit(f"downloaded asset differs: {name}")
         sign_args.extend(["--artifact", platform, arch, kind, str(path)])
         verify_args.extend(["--artifact", str(path)])
