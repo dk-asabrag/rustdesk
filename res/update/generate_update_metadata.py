@@ -124,7 +124,7 @@ def command_sign(args):
         "version": args.version,
         "release_id": args.release_id,
         "published_at": args.published_at,
-        "signature_key_id": KEY_ID,
+        "signature_key_id": args.key_id,
         "artifacts": artifacts,
     }
     private_key = ed25519.Ed25519PrivateKey.from_private_bytes(decode_env(SEED_ENV, 32))
@@ -132,7 +132,7 @@ def command_sign(args):
     signature = {
         "schema_version": SCHEMA_VERSION,
         "algorithm": SIGNATURE_ALGORITHM,
-        "key_id": KEY_ID,
+        "key_id": args.key_id,
         "signature": base64.b64encode(
             private_key.sign(SIGNATURE_CONTEXT + metadata_bytes)
         ).decode("ascii"),
@@ -141,11 +141,11 @@ def command_sign(args):
     write_bytes(signature_out, stable_json(signature))
 
 
-def verify_metadata_signature(metadata_bytes, signature):
+def verify_metadata_signature(metadata_bytes, signature, key_id=KEY_ID):
     if (
         signature.get("schema_version") != SCHEMA_VERSION
         or signature.get("algorithm") != SIGNATURE_ALGORITHM
-        or signature.get("key_id") != KEY_ID
+        or signature.get("key_id") != key_id
     ):
         fail("invalid signature metadata")
     public_key = ed25519.Ed25519PublicKey.from_public_bytes(decode_env(PUBLIC_KEY_ENV, 32))
@@ -193,7 +193,7 @@ def command_verify(args):
     metadata_bytes = Path(args.metadata).read_bytes()
     metadata = json.loads(metadata_bytes)
     signature = json.loads(Path(args.signature).read_bytes())
-    verify_metadata_signature(metadata_bytes, signature)
+    verify_metadata_signature(metadata_bytes, signature, args.key_id)
     package_id = validate_or_fail(validate_package_id, args.package_id)
     release_base_url = validate_or_fail(
         validate_release_base_url, args.release_base_url
@@ -204,7 +204,7 @@ def command_verify(args):
         "package_id": package_id,
         "version": args.version,
         "release_id": args.release_id,
-        "signature_key_id": KEY_ID,
+        "signature_key_id": args.key_id,
     }
     if any(metadata.get(key) != value for key, value in expected_fields.items()):
         fail("metadata does not match the release")
@@ -262,6 +262,7 @@ def build_parser():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     sign = commands.add_parser("sign")
+    sign.add_argument("--key-id", default=KEY_ID)
     sign.add_argument("--artifact", action="append", nargs=4, required=True)
     sign.add_argument("--version", required=True)
     sign.add_argument("--release-id", required=True)
@@ -272,6 +273,7 @@ def build_parser():
     sign.add_argument("--signature-out", required=True)
     sign.set_defaults(func=command_sign)
     verify = commands.add_parser("verify")
+    verify.add_argument("--key-id", default=KEY_ID)
     verify.add_argument("--metadata", required=True)
     verify.add_argument("--signature", required=True)
     verify.add_argument("--artifact", action="append", required=True)

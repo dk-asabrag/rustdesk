@@ -1067,6 +1067,11 @@ pub fn check_software_update() {
     }
 }
 
+#[cfg(feature = "fork-updates")]
+pub(crate) const UPDATE_REPOSITORY_OWNER: &str = crate::fork_updates::OWNER;
+#[cfg(not(feature = "fork-updates"))]
+pub(crate) const UPDATE_REPOSITORY_OWNER: &str = "rustdesk";
+
 pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String> {
     let url = url::Url::parse(update_url)?;
     if url.scheme() != "https" || url.host_str() != Some("github.com") {
@@ -1097,8 +1102,8 @@ pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String>
     };
     let segments = segments.collect::<Vec<_>>();
     let release_id = match segments.as_slice() {
-        ["rustdesk", "rustdesk", "releases", "tag", release_id] => *release_id,
-        ["rustdesk", "rustdesk", "releases", "tag", release_id, ""] => *release_id,
+        [owner, "rustdesk", "releases", "tag", release_id] if *owner == UPDATE_REPOSITORY_OWNER => *release_id,
+        [owner, "rustdesk", "releases", "tag", release_id, ""] if *owner == UPDATE_REPOSITORY_OWNER => *release_id,
         _ => bail!(
             "Update URL is not a RustDesk release tag URL: {}",
             update_url
@@ -1177,43 +1182,48 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
-    let proxy_conf = Config::get_socks();
-    let tls_url = get_url_for_tls(&url, &proxy_conf);
-    let tls_type = get_cached_tls_type(tls_url);
-    let is_tls_not_cached = tls_type.is_none();
-    let tls_type = tls_type.unwrap_or(TlsType::Rustls);
-    let client = create_http_client_async(tls_type, false);
-    let latest_release_response: ResultType<_> = match client.post(&url).json(&request).send().await
-    {
-        Ok(resp) => Ok((tls_type, resp)),
-        Err(err) => {
-            if is_tls_not_cached && err.is_request() {
-                let tls_type = TlsType::NativeTls;
-                let client = create_http_client_async(tls_type, false);
-                match client.post(&url).json(&request).send().await {
-                    Ok(resp) => Ok((tls_type, resp)),
-                    Err(err) => Err(err.into()),
+    #[cfg(feature = "fork-updates")]
+    let response_bytes = crate::fork_updates::latest_release_response().await;
+    #[cfg(not(feature = "fork-updates"))]
+    let response_bytes = {
+        let (request, url) =
+            hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+        let proxy_conf = Config::get_socks();
+        let tls_url = get_url_for_tls(&url, &proxy_conf);
+        let tls_type = get_cached_tls_type(tls_url);
+        let is_tls_not_cached = tls_type.is_none();
+        let tls_type = tls_type.unwrap_or(TlsType::Rustls);
+        let client = create_http_client_async(tls_type, false);
+        let latest_release_response: ResultType<_> = match client.post(&url).json(&request).send().await
+        {
+            Ok(resp) => Ok((tls_type, resp)),
+            Err(err) => {
+                if is_tls_not_cached && err.is_request() {
+                    let tls_type = TlsType::NativeTls;
+                    let client = create_http_client_async(tls_type, false);
+                    match client.post(&url).json(&request).send().await {
+                        Ok(resp) => Ok((tls_type, resp)),
+                        Err(err) => Err(err.into()),
+                    }
+                } else {
+                    Err(err.into())
                 }
-            } else {
-                Err(err.into())
             }
-        }
-    };
-    let response_bytes = match latest_release_response {
-        Ok((used_tls_type, response)) => {
-            upsert_tls_cache(tls_url, used_tls_type, false);
-            let status = response.status();
-            if !status.is_success() {
-                Err(anyhow!(
-                    "Software update check failed with HTTP status: {status}"
-                ))
-            } else {
-                response.bytes().await.map_err(|err| err.into())
+        };
+        match latest_release_response {
+            Ok((used_tls_type, response)) => {
+                upsert_tls_cache(tls_url, used_tls_type, false);
+                let status = response.status();
+                if !status.is_success() {
+                    Err(anyhow!(
+                        "Software update check failed with HTTP status: {status}"
+                    ))
+                } else {
+                    response.bytes().await.map_err(|err| err.into())
+                }
             }
+            Err(err) => Err(err),
         }
-        Err(err) => Err(err),
     };
     let result = response_bytes.and_then(process_software_update_check_response);
     if result.is_err() {
@@ -3121,9 +3131,9 @@ mod tests {
 
     #[test]
     fn parses_stable_rustdesk_release_url() {
-        let update_url = "https://github.com/rustdesk/rustdesk/releases/tag/v1.4.6";
+        let update_url = format!("https://github.com/{UPDATE_REPOSITORY_OWNER}/rustdesk/releases/tag/v1.4.6");
 
-        assert_eq!(release_id_from_update_url(update_url).unwrap(), "v1.4.6");
+        assert_eq!(release_id_from_update_url(&update_url).unwrap(), "v1.4.6");
         assert_eq!(display_version_from_release_id("v1.4.6").unwrap(), "1.4.6");
         assert_eq!(
             release_id_from_update_url(&format!("{update_url}/")).unwrap(),
@@ -3148,7 +3158,8 @@ mod tests {
             "https://github.com/rustdesk/rustdesk/releases/tag/v1%2F4%2F6",
             "https://github.com/rustdesk/rustdesk/releases/tag/%2e%2e",
         ] {
-            assert!(release_id_from_update_url(update_url).is_err());
+            let update_url = update_url.replace("/rustdesk/rustdesk/", &format!("/{UPDATE_REPOSITORY_OWNER}/rustdesk/"));
+            assert!(release_id_from_update_url(&update_url).is_err());
         }
         for release_id in ["v1.4.6-rc1", "nightly", "v9223372036854775807.1.1"] {
             assert!(display_version_from_release_id(release_id).is_err());

@@ -150,6 +150,22 @@ pub(crate) fn verify_update_metadata(
     signature_bytes: &[u8],
     requirements: UpdateMetadataRequirements<'_>,
 ) -> ResultType<VerifiedUpdateArtifact> {
+    #[cfg(feature = "fork-updates")]
+    let fork_keys = [TrustedUpdateKey {
+        key_id: crate::fork_updates::KEY_ID,
+        algorithm: SIGNATURE_ALGORITHM,
+        public_key: crate::fork_updates::public_key(
+            option_env!("RUSTDESK_UPDATE_ED25519_PUBLIC_KEY").unwrap_or(""),
+        )?,
+    }];
+    #[cfg(feature = "fork-updates")]
+    let trusted_keys = &fork_keys[..];
+    #[cfg(not(feature = "fork-updates"))]
+    let trusted_keys = TRUSTED_UPDATE_KEYS;
+    #[cfg(feature = "fork-updates")]
+    let expected_package_id = crate::fork_updates::PACKAGE_ID;
+    #[cfg(not(feature = "fork-updates"))]
+    let expected_package_id = PUBLIC_UPDATE_PACKAGE_ID;
     let artifact_url_policy =
         ArtifactUrlPolicy::ExactPrefix(requirements.expected_artifact_url_prefix);
     let metadata_requirements = MetadataRequirements {
@@ -162,9 +178,9 @@ pub(crate) fn verify_update_metadata(
         signature_bytes,
         VerificationOptions {
             requirements: metadata_requirements,
-            expected_package_id: PUBLIC_UPDATE_PACKAGE_ID,
+            expected_package_id,
             artifact_url_policy,
-            trusted_keys: TRUSTED_UPDATE_KEYS,
+            trusted_keys,
         },
     )
 }
