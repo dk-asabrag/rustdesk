@@ -1,0 +1,25 @@
+name: Cancel superseded automatic-update validation runs
+on: create
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cancel-superseded:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref == 'ops/cancel-superseded-auto-update-ci-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const current=(await github.rest.git.getRef({owner,repo,ref:'heads/feature/signed-auto-updates-2026-11-08'})).data.object.sha;
+            if(current!=='b3d92d42a875adacf278e72252930a692a9a037d') throw new Error('Candidate changed; inspect before cancellation');
+            for(const run_id of [42515585412,42515716800,42515585402,42515717693]){
+              const run=(await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if(run.head_branch!=='feature/signed-auto-updates-2026-11-08'||run.head_sha===current||run.event!=='pull_request'||!['CI','Full Flutter CI'].includes(run.name)) throw new Error('Unexpected superseded run');
+              if(run.status==='completed'){core.info('Already completed: '+run_id);continue;}
+              const comparison=(await github.rest.repos.compareCommits({owner,repo,base:run.head_sha,head:current})).data;
+              if(comparison.status!=='ahead') throw new Error('Run source is not superseded');
+              await github.rest.actions.cancelWorkflowRun({owner,repo,run_id});
+              core.info('Cancelled superseded validation '+run_id);
+            }
