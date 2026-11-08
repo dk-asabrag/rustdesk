@@ -1212,7 +1212,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pinned signing dependencies
-        run: python -m pip install --only-binary=:all: --require-hashes -r res/update/update_metadata_requirements.txt
+        run: 'python -m pip install --only-binary=:all: --require-hashes -r res/update/update_metadata_requirements.txt'
       - name: Verify built assets, sign and stage the fork update manifest
         env:
           GH_TOKEN: ${{ github.token }}
