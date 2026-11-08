@@ -573,7 +573,7 @@ jobs:
 
       - name: Publish Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && (env.PUBLISH_UPDATE_METADATA != 'true' || github.repository == 'dk-asabrag/rustdesk')
         with:
           target_commitish: ${{ github.sha }}
           draft: ${{ github.repository != 'rustdesk/rustdesk' }}
@@ -789,7 +789,7 @@ jobs:
 
       - name: Publish Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && (env.PUBLISH_UPDATE_METADATA != 'true' || github.repository == 'dk-asabrag/rustdesk')
         with:
           target_commitish: ${{ github.sha }}
           draft: ${{ github.repository != 'rustdesk/rustdesk' }}
@@ -1182,7 +1182,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish DMG package
-        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && (env.PUBLISH_UPDATE_METADATA != 'true' || github.repository == 'dk-asabrag/rustdesk')
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           target_commitish: ${{ github.sha }}
