@@ -1,0 +1,47 @@
+name: Build signed personalized RustDesk 1.5.2
+on: create
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch-validated-build:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref == 'ops/build-signed-1.5.2-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact source, completed tests and owner signing configuration
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        env:
+          UPDATE_SEED: ${{ secrets.RUSTDESK_UPDATE_ED25519_SEED }}
+          UPDATE_PUBLIC: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const source='b3d92d42a875adacf278e72252930a692a9a037d';
+            const branch='feature/signed-auto-updates-2026-11-08';
+            const ref=(await github.rest.git.getRef({owner,repo,ref:'heads/'+branch})).data;
+            if(ref.object.sha!==source) throw new Error('Candidate changed');
+            const backup=(await github.rest.git.getRef({owner,repo,ref:'heads/backup/pre-auto-update-2026-11-08'})).data;
+            if(backup.object.sha!=='e7829a52b639d95eda2f6f541566efadecd8721a') throw new Error('Pre-change backup changed');
+            for(const run_id of [42515822828,42515822849]){
+              const r=(await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if(r.head_sha!==source||r.status!=='completed'||r.conclusion!=='success') throw new Error('Validation not satisfied: '+run_id);
+            }
+            const flutter=(await github.rest.actions.getWorkflowRun({owner,repo,run_id:42515822867})).data;
+            if(flutter.head_sha!==source) throw new Error('Flutter validation source changed');
+            // Only a draft build is dispatched here; publication still requires completed platform validation.
+            const crypto=require('crypto');
+            const encoded=process.env.UPDATE_SEED||'';
+            const seed=Buffer.from(encoded,'base64');
+            const publicEncoded=process.env.UPDATE_PUBLIC||'';
+            const pub=Buffer.from(publicEncoded,'base64');
+            if(seed.length!==32||seed.toString('base64')!==encoded||pub.length!==32||pub.toString('base64')!==publicEncoded) throw new Error('Signing configuration missing or invalid');
+            const key=crypto.createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),seed]),format:'der',type:'pkcs8'});
+            const actual=crypto.createPublicKey(key).export({format:'der',type:'spki'}).subarray(-32);
+            if(!actual.equals(pub)) throw new Error('Signing key mismatch');
+            try{
+              await github.rest.repos.getReleaseByTag({owner,repo,tag:'1.5.2'});
+              throw new Error('Release 1.5.2 already exists; inspect before rebuilding');
+            }catch(error){if(error.status!==404)throw error;}
+            await github.rest.actions.createWorkflowDispatch({owner,repo,workflow_id:'flutter-tag.yml',ref:branch,inputs:{'release-tag':'1.5.2'}});
+            core.info('Dispatched exact-source signed draft build for 1.5.2. Master and existing releases were not changed.');
