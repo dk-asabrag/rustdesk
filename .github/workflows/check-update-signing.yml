@@ -1,0 +1,29 @@
+name: Inspect fork update signing readiness
+on: create
+permissions:
+  contents: read
+jobs:
+  readiness:
+    if: github.event.ref == 'ops/check-update-signing-2026-11-08' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Inspect signing configuration without exposing private material
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        env:
+          UPDATE_SEED: ${{ secrets.RUSTDESK_UPDATE_ED25519_SEED }}
+          UPDATE_PUBLIC: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
+        with:
+          script: |
+            const crypto = require('crypto');
+            const seed = process.env.UPDATE_SEED || '';
+            const configured = process.env.UPDATE_PUBLIC || '';
+            core.info('Signing seed configured: ' + Boolean(seed));
+            core.info('Public variable configured: ' + Boolean(configured));
+            if (seed) {
+              const raw = Buffer.from(seed, 'base64');
+              if (raw.length !== 32 || raw.toString('base64') !== seed) throw new Error('Invalid seed encoding');
+              const key = crypto.createPrivateKey({key: Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),raw]),format:'der',type:'pkcs8'});
+              const publicKey = crypto.createPublicKey(key).export({format:'der',type:'spki'}).subarray(-32).toString('base64');
+              core.info('Derived public key: ' + publicKey);
+              core.info('Configured public key matches: ' + (configured === publicKey));
+            }
