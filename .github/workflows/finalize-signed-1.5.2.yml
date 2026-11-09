@@ -1,0 +1,112 @@
+name: Publish validated signed RustDesk 1.5.2
+on: create
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    if: github.repository == 'dk-asabrag/rustdesk' && github.event.ref == 'ops/publish-signed-1.5.2-2026-11-09' && github.event.sender.login == 'dk-asabrag'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify validations, every file and the actual signature before publication
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_PUBLIC: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const source='a8c294780815c510f74ed22fcef68e6177dbfc4b';
+            const previous='e7829a52b639d95eda2f6f541566efadecd8721a';
+            const release_id=438532861;
+            const expected=["rustdesk-1.5.2-0-x86_64.pkg.tar.zst","rustdesk-1.5.2-0.aarch64-suse.rpm","rustdesk-1.5.2-0.aarch64.rpm","rustdesk-1.5.2-0.x86_64-suse.rpm","rustdesk-1.5.2-0.x86_64.rpm","rustdesk-1.5.2-aarch64.AppImage","rustdesk-1.5.2-aarch64.apk","rustdesk-1.5.2-aarch64.deb","rustdesk-1.5.2-aarch64.dmg","rustdesk-1.5.2-aarch64.exe","rustdesk-1.5.2-aarch64.flatpak","rustdesk-1.5.2-aarch64.msi","rustdesk-1.5.2-armv7-sciter.deb","rustdesk-1.5.2-armv7.apk","rustdesk-1.5.2-universal.apk","rustdesk-1.5.2-unsigned.tar.gz","rustdesk-1.5.2-x86-sciter.exe","rustdesk-1.5.2-x86_64-sciter.deb","rustdesk-1.5.2-x86_64-sciter.flatpak","rustdesk-1.5.2-x86_64.AppImage","rustdesk-1.5.2-x86_64.apk","rustdesk-1.5.2-x86_64.deb","rustdesk-1.5.2-x86_64.dmg","rustdesk-1.5.2-x86_64.exe","rustdesk-1.5.2-x86_64.flatpak","rustdesk-1.5.2-x86_64.msi","rustdesk-unattended-wayland-1.5.2-x86_64.deb","rustdesk-update.json","rustdesk-update.json.sig","rustdesk.sbom.json"];
+            if(owner!=='dk-asabrag'||repo!=='rustdesk') throw new Error('Unexpected repository');
+            const gates=[
+              [42525046559,'.github/workflows/fork-update-checks.yml'],
+              [42525046612,'.github/workflows/ci.yml'],
+              [42525046690,'.github/workflows/flutter-ci.yml'],
+              [42525118229,'.github/workflows/flutter-tag.yml']
+            ];
+            for(const [run_id,path] of gates){
+              const r=(await github.rest.actions.getWorkflowRun({owner,repo,run_id})).data;
+              if(r.head_sha!==source||r.path!==path||r.status!=='completed'||r.conclusion!=='success') throw new Error('Validation gate failed: '+run_id);
+            }
+            const build=(await github.rest.actions.getWorkflowRun({owner,repo,run_id:42525118229})).data;
+            const buildJobs=await github.paginate(github.rest.actions.listJobsForWorkflowRun,{owner,repo,run_id:42525118229,filter:'latest',per_page:100});
+            if(!buildJobs.some(j=>j.name==='run-flutter-tag-build / publish-fork-update-metadata'&&j.conclusion==='success')) throw new Error('Fork signing job incomplete');
+            const release=(await github.rest.repos.getRelease({owner,repo,release_id})).data;
+            if(release.tag_name!=='1.5.2'||release.target_commitish!==source||!release.draft) throw new Error('Expected exact-source unpublished draft');
+            let assets=await github.paginate(github.rest.repos.listReleaseAssets,{owner,repo,release_id,per_page:100});
+            const obsolete=[{"id":725163644,"name":"rustdesk-1.5.1-0.aarch64-suse.rpm","digest":"sha256:92cefd886a22a1a38728bf220aa1edf8a21bbff126d4b4ead6aadd4d9a40c3c8","size":33510049},{"id":725163643,"name":"rustdesk-1.5.1-0.aarch64.rpm","digest":"sha256:d2b68559fdda794f9750f2f335131aae5f5c92d48d95ee7c5c59513daf768018","size":33510010},{"id":725177092,"name":"rustdesk-1.5.1-0.x86_64-suse.rpm","digest":"sha256:ad85c73cd1ee1d6fd7033e01dfdc6fd3c47fd2aa35e0cb4e38ac7f66145c582f","size":34337486},{"id":725177095,"name":"rustdesk-1.5.1-0.x86_64.rpm","digest":"sha256:45488417c9af32dd6219e9c828c58ac8fc0f89b934a8a3e656f9489e39e2a08c","size":34337464}];
+            for(const old of obsolete){
+              const asset=assets.find(a=>a.id===old.id);
+              if(!asset)continue;
+              if(asset.name!==old.name||asset.digest!==old.digest||asset.size!==old.size)throw new Error('Obsolete draft asset changed');
+              if(!assets.some(a=>a.name===old.name.replace('1.5.1','1.5.2')&&a.state==='uploaded'&&a.size>0))throw new Error('Corrected RPM replacement missing');
+            }
+            for(const old of obsolete)if(assets.some(a=>a.id===old.id))await github.rest.repos.deleteReleaseAsset({owner,repo,asset_id:old.id});
+            assets=await github.paginate(github.rest.repos.listReleaseAssets,{owner,repo,release_id,per_page:100});
+            if(assets.length!==expected.length||new Set(assets.map(a=>a.name)).size!==expected.length) throw new Error('Unexpected release asset count');
+            for(const name of expected){
+              const a=assets.find(a=>a.name===name);
+              if(!a||a.state!=='uploaded'||a.size<=0||!/^sha256:[a-f0-9]{64}$/.test(a.digest||'')||Date.parse(a.created_at)<Date.parse(build.created_at)) throw new Error('Missing, old or unverified asset: '+name);
+            }
+            const crypto=require('crypto');
+            const {execFileSync}=require('child_process');
+            function sidecar(name){
+              const a=assets.find(a=>a.name===name);
+              const bytes=execFileSync('gh',['api','repos/'+owner+'/'+repo+'/releases/assets/'+a.id,'--header','Accept: application/octet-stream'],{maxBuffer:2*1024*1024});
+              if(bytes.length!==a.size||'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')!==a.digest) throw new Error('Sidecar digest mismatch: '+name);
+              return bytes;
+            }
+            const metadataBytes=sidecar('rustdesk-update.json');
+            const sig=JSON.parse(sidecar('rustdesk-update.json.sig').toString('utf8'));
+            const metadata=JSON.parse(metadataBytes.toString('utf8'));
+            const publicEncoded=process.env.UPDATE_PUBLIC||'';
+            if(publicEncoded!=='Di++FkFosatJ6QhkZb0COefAtJBvjmGDK4Za+A69AFE=') throw new Error('Configured public key changed');
+            const pub=Buffer.from(publicEncoded,'base64');
+            if(pub.length!==32||pub.toString('base64')!==publicEncoded) throw new Error('Invalid public key');
+            const signature=Buffer.from(sig.signature||'','base64');
+            if(sig.schema_version!==1||sig.algorithm!=='ed25519'||sig.key_id!=='dk-asabrag-2026-ed25519-main'||signature.length!==64||signature.toString('base64')!==sig.signature) throw new Error('Invalid signature schema');
+            const key=crypto.createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),pub]),format:'der',type:'spki'});
+            if(!crypto.verify(null,Buffer.concat([Buffer.from('RustDesk update metadata v1\n'),metadataBytes]),key,signature)) throw new Error('Update manifest signature does not verify');
+            if(metadata.schema_version!==1||metadata.app!=='rustdesk'||metadata.package_id!=='rustdesk.dk-asabrag'||metadata.version!=='1.5.2'||metadata.release_id!=='1.5.2'||metadata.signature_key_id!==sig.key_id||metadata.published_at!==build.created_at) throw new Error('Update manifest identity differs');
+            const selectors={"windows/x86_64/exe":"rustdesk-1.5.2-x86_64.exe","windows/x86_64/msi":"rustdesk-1.5.2-x86_64.msi","windows/aarch64/exe":"rustdesk-1.5.2-aarch64.exe","windows/aarch64/msi":"rustdesk-1.5.2-aarch64.msi","windows/x86/exe":"rustdesk-1.5.2-x86-sciter.exe","macos/aarch64/dmg":"rustdesk-1.5.2-aarch64.dmg","macos/x86_64/dmg":"rustdesk-1.5.2-x86_64.dmg"};
+            if(!Array.isArray(metadata.artifacts)||metadata.artifacts.length!==Object.keys(selectors).length) throw new Error('Update manifest artifacts incomplete');
+            const seen=new Set();
+            for(const artifact of metadata.artifacts){
+              const selector=artifact.platform+'/'+artifact.arch+'/'+artifact.format;
+              const a=assets.find(a=>a.name===artifact.file_name);
+              if(selectors[selector]!==artifact.file_name||seen.has(selector)||!a||artifact.url!=='https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/'+a.name||artifact.size!==a.size||'sha256:'+artifact.sha256!==a.digest) throw new Error('Update manifest asset differs: '+selector);
+              seen.add(selector);
+            }
+            const backup=(await github.rest.git.getRef({owner,repo,ref:'heads/backup/pre-auto-update-2026-11-08'})).data;
+            if(backup.object.sha!==previous) throw new Error('Backup changed');
+            const head=(await github.rest.git.getRef({owner,repo,ref:'heads/feature/signed-auto-updates-2026-11-08'})).data;
+            if(head.object.sha!==source) throw new Error('Candidate changed');
+            try{
+              const existingTag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;
+              let existingSha=existingTag.object.sha;
+              if(existingTag.object.type==='tag')existingSha=(await github.rest.git.getTag({owner,repo,tag_sha:existingSha})).data.object.sha;
+              if(existingSha!==source)throw new Error('Existing release tag points to another source');
+            }catch(error){if(error.status!==404)throw error;}
+            const master=(await github.rest.git.getRef({owner,repo,ref:'heads/master'})).data;
+            if(![previous,source].includes(master.object.sha)) throw new Error('Master changed unexpectedly');
+            if(master.object.sha!==source) await github.rest.git.updateRef({owner,repo,ref:'heads/master',sha:source,force:false});
+            const checkedMaster=(await github.rest.git.getRef({owner,repo,ref:'heads/master'})).data;
+            if(checkedMaster.object.sha!==source) throw new Error('Master verification failed');
+            let tag;
+            try{tag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;}
+            catch(error){
+              if(error.status!==404)throw error;
+              await github.rest.git.createRef({owner,repo,ref:'refs/tags/1.5.2',sha:source});
+              tag=(await github.rest.git.getRef({owner,repo,ref:'tags/1.5.2'})).data;
+            }
+            let tagSha=tag.object.sha;
+            if(tag.object.type==='tag')tagSha=(await github.rest.git.getTag({owner,repo,tag_sha:tagSha})).data.object.sha;
+            if(tagSha!==source) throw new Error('Release tag differs');
+            await github.rest.repos.updateRelease({owner,repo,release_id,draft:false,prerelease:false,make_latest:'true',target_commitish:source,name:'RustDesk 1.5.2 — mises à jour automatiques',body:"Version personnalisée **1.5.2**, basée sur RustDesk stable officielle **1.5.1**, avec les mises à jour automatiques depuis ce dépôt.\n\n### Première installation\nInstallez cette version une première fois pour activer le nouveau canal. Les clients personnalisés 1.5.1 déjà installés ne connaissent pas ce canal.\n\n- Windows x64 : [EXE](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/rustdesk-1.5.2-x86_64.exe) · [MSI](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/rustdesk-1.5.2-x86_64.msi)\n- Windows ARM64 : [EXE](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/rustdesk-1.5.2-aarch64.exe) · [MSI](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/rustdesk-1.5.2-aarch64.msi)\n- Windows 32 bits : [EXE Sciter](https://github.com/dk-asabrag/rustdesk/releases/download/1.5.2/rustdesk-1.5.2-x86-sciter.exe)\n\n### Mises à jour automatiques\nLe client recherche les prochaines versions stables publiées ici. Chaque mise à jour est contrôlée par une signature Ed25519, sa taille et son empreinte SHA-256 avant installation. L’installation est reportée lorsqu’une session distante est active.\n\nL’option est activée au premier lancement de ce nouveau client ; vos choix ultérieurs dans les paramètres sont conservés. La vérification démarre après environ 30 secondes, puis intervient quotidiennement.\n\nWindows utilise le service installé. macOS utilise son service système. Linux et les applications mobiles conservent leur mode habituel d’installation.\n\n### Personnalisations conservées\nServeur intégré : **rustdesk.anjou.cc**. La clé publique du serveur, le sous-module `dk-asabrag/hbb_common` et les personnalisations Windows sont conservés. Le correctif de sécurité des relais intégré à 1.5.1 reste présent.\n\n### Sources et validations\n[Source exacte a8c29478](https://github.com/dk-asabrag/rustdesk/commit/a8c294780815c510f74ed22fcef68e6177dbfc4b) · [Détail de l’ajout](https://github.com/dk-asabrag/rustdesk/pull/2)\n\n[CI Linux — 399 tests](https://github.com/dk-asabrag/rustdesk/actions/runs/42525046612) · [CI Flutter](https://github.com/dk-asabrag/rustdesk/actions/runs/42525046690) · [Construction signée](https://github.com/dk-asabrag/rustdesk/actions/runs/42525118229)\n\nLimite amont conservée : un repli WebRTC vers une adresse de relais réécrite par hbbs pour le réseau local peut être refusé et expirer.\n"});
+            const published=(await github.rest.repos.getRelease({owner,repo,release_id})).data;
+            if(published.draft||published.prerelease||published.tag_name!=='1.5.2'||published.html_url!=='https://github.com/dk-asabrag/rustdesk/releases/tag/1.5.2') throw new Error('Publication verification failed');
+            await core.summary.addHeading('Signed automatic-update client published').addLink('RustDesk 1.5.2',published.html_url).addRaw('\n\nSource: '+source+'\n\nAll 30 assets and the Ed25519 manifest verified. Existing 1.5.1 release retained.\n').write();
