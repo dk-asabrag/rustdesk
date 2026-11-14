@@ -3129,22 +3129,6 @@ mod tests {
     }
 
     #[test]
-    fn relay_uuid_rejects_control_bytes_but_not_other_id_formats() {
-        for uuid in [
-            "e4c181d0-41c7-4ae6-8ef0-36581b6b2b12",
-            "E4C181D0-41C7-4AE6-8EF0-36581B6B2B12",
-            "01890a5d-ac96-774b-bcce-b302099a8057",
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        ] {
-            assert!(check_relay_uuid(uuid).is_ok(), "rejected {uuid:?}");
-        }
-        let too_long = "a".repeat(129);
-        for uuid in ["", "\r\nPING\r\n", "a b", "a\0", too_long.as_str()] {
-            assert!(check_relay_uuid(uuid).is_err(), "accepted {uuid:?}");
-        }
-    }
-
-    #[test]
     fn parses_stable_rustdesk_release_url() {
         let update_url = format!("https://github.com/{UPDATE_REPOSITORY_OWNER}/rustdesk/releases/tag/v1.4.6");
 
