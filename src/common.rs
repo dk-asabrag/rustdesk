@@ -970,7 +970,7 @@ pub fn get_sysinfo() -> serde_json::Value {
     let cpu_name = cpus.first().map(|x| x.brand()).unwrap_or_default();
     let cpu_name = cpu_name.trim_end();
     let cpu_freq = cpus.first().map(|x| x.frequency()).unwrap_or_default();
-    let cpu_freq = (cpu_freq as f64 / 1024. * 100.).round() / 100.;
+    let cpu_freq = (cpu_freq as f64 / 1000. * 100.).round() / 100.;
     let cpu = if cpu_freq > 0. {
         format!("{}, {}GHz, ", cpu_name, cpu_freq)
     } else {
@@ -3111,7 +3111,22 @@ mod tests {
         self,
         time::{interval, interval_at, sleep, Duration, Instant, Interval},
     };
-    use std::collections::HashSet;
+
+    #[test]
+    fn relay_uuid_rejects_control_bytes_but_not_other_id_formats() {
+        for uuid in [
+            "e4c181d0-41c7-4ae6-8ef0-36581b6b2b12",
+            "E4C181D0-41C7-4AE6-8EF0-36581B6B2B12",
+            "01890a5d-ac96-774b-bcce-b302099a8057",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        ] {
+            assert!(check_relay_uuid(uuid).is_ok(), "rejected {uuid:?}");
+        }
+        let too_long = "a".repeat(129);
+        for uuid in ["", "\r\nPING\r\n", "a b", "a\0", too_long.as_str()] {
+            assert!(check_relay_uuid(uuid).is_err(), "accepted {uuid:?}");
+        }
+    }
 
     #[test]
     fn relay_uuid_rejects_control_bytes_but_not_other_id_formats() {
@@ -3174,16 +3189,6 @@ mod tests {
                 assert!(cursor_content_id(32, 32, hotx, 0, colors) <= MAX_SAFE_INTEGER);
             }
         }
-    }
-
-    #[inline]
-    fn get_timestamp_secs() -> u128 {
-        (std::time::SystemTime::UNIX_EPOCH
-            .elapsed()
-            .unwrap()
-            .as_millis()
-            + 500)
-            / 1000
     }
 
     fn interval_maker() -> Interval {
@@ -3252,9 +3257,10 @@ mod tests {
         }
     }
 
-    // ThrottledInterval tick less times than tokio interval, if there're sleeps
+    // ThrottledInterval tick less times than tokio interval, if there're sleeps.
+    // The clock is paused, so a stalled runner cannot make two ticks look close together.
     #[allow(non_snake_case)]
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_RustDesk_interval_sleep() {
         let base_intervals = [interval_maker, interval_at_maker];
         for (i, maker) in base_intervals.into_iter().enumerate() {
@@ -3264,17 +3270,24 @@ mod tests {
             loop {
                 tokio::select! {
                     _ = timer.tick() => {
-                        times.push(get_timestamp_secs());
+                        times.push(Instant::now());
                         if times.len() == 5 {
                             break;
                         }
                     }
                 }
             }
-            // No multiple ticks in the `interval` time.
-            // Values in "times" are unique and are less than normal tokio interval.
-            let times2: HashSet<u128> = HashSet::from_iter(times.clone());
-            assert_eq!(times.len(), times2.len(), "test: {}", i);
+            // No multiple ticks in the `interval` time: tokio's interval bursts the missed ticks
+            // with no gap, ThrottledInterval keeps them at least 0.9 * period apart.
+            for pair in times.windows(2) {
+                let gap = pair[1] - pair[0];
+                assert!(
+                    gap >= Duration::from_millis(900),
+                    "test: {}, gap: {:?}",
+                    i,
+                    gap
+                );
+            }
         }
     }
 
